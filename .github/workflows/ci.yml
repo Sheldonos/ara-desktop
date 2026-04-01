@@ -1,0 +1,70 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  typecheck:
+    name: TypeScript Check
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: TypeScript check (renderer)
+        run: npx tsc --noEmit
+
+      - name: TypeScript check (main process)
+        run: npx tsc -p tsconfig.main.json --noEmit
+
+  build-check:
+    name: Build Check
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    needs: typecheck
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build renderer
+        run: npm run build:renderer
+
+      - name: Build main process
+        run: npm run build:main
+
+      - name: Verify dist output
+        run: |
+          echo "=== Renderer output ==="
+          ls -la dist/renderer/ 2>/dev/null || echo "No renderer dist"
+          echo "=== Main process output ==="
+          ls -la dist/main/ 2>/dev/null || echo "No main dist"
+          echo "=== Preload output ==="
+          ls -la dist/main/preload/ 2>/dev/null || echo "No preload dist"

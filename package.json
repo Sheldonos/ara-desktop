@@ -79,6 +79,7 @@
       "entitlements": "build/entitlements.mac.plist",
       "entitlementsInherit": "build/entitlements.mac.plist"
     },
+    "afterSign": "scripts/notarize.js",
     "dmg": {
       "title": "ARA Platform",
       "background": "assets/dmg-background.png",
@@ -86,6 +87,28 @@
         "width": 540,
         "height": 380
       }
+    },
+    "win": {
+      "target": [
+        { "target": "nsis", "arch": ["x64"] }
+      ],
+      "icon": "assets/icon.ico",
+      "certificateSubjectName": "ARA Platform",
+      "signingHashAlgorithms": ["sha256"]
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "installerIcon": "assets/icon.ico",
+      "uninstallerIcon": "assets/icon.ico",
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    },
+    "linux": {
+      "target": ["AppImage", "deb"],
+      "icon": "assets/icon.png",
+      "category": "Utility"
     },
     "files": [
       "dist/**/*",
