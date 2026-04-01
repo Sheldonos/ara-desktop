@@ -18,7 +18,9 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "electron-log": "^5.4.3",
     "electron-store": "^8.2.0",
+    "electron-updater": "^6.8.3",
     "ws": "^8.18.0",
     "zustand": "^5.0.3"
   },
@@ -57,8 +59,20 @@
       "category": "public.app-category.productivity",
       "icon": "assets/icon.icns",
       "target": [
-        { "target": "dmg", "arch": ["x64", "arm64"] },
-        { "target": "zip", "arch": ["x64", "arm64"] }
+        {
+          "target": "dmg",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
       ],
       "hardenedRuntime": true,
       "gatekeeperAssess": false,
@@ -68,7 +82,10 @@
     "dmg": {
       "title": "ARA Platform",
       "background": "assets/dmg-background.png",
-      "window": { "width": 540, "height": 380 }
+      "window": {
+        "width": 540,
+        "height": 380
+      }
     },
     "files": [
       "dist/**/*",
@@ -76,8 +93,23 @@
       "node_modules/**/*"
     ],
     "extraResources": [
-      { "from": "vendor/openclaw", "to": "openclaw", "filter": ["**/*"] }
+      {
+        "from": "vendor/openclaw",
+        "to": "openclaw",
+        "filter": [
+          "**/*"
+        ]
+      }
     ],
-    "asar": true
+    "asar": true,
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "Sheldonos",
+        "repo": "ara-desktop",
+        "private": false,
+        "releaseType": "release"
+      }
+    ]
   }
 }

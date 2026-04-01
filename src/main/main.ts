@@ -14,6 +14,7 @@ import { spawn, ChildProcess } from "child_process";
 import fs from "fs";
 import Store from "electron-store";
 import { GatewayBridge } from "./gateway-bridge";
+import { initAutoUpdater, checkForUpdatesOnStartup } from "./updater";
 
 // ─── Store (persists user settings across restarts) ───────────────────────────
 const store = new Store<{
@@ -408,6 +409,12 @@ app.whenReady().then(async () => {
   createWindow();
   createTray();
   await startGateway();
+
+  // Auto-updater: only active in packaged builds (not dev mode)
+  if (app.isPackaged) {
+    initAutoUpdater(mainWindow);
+    checkForUpdatesOnStartup(mainWindow);
+  }
 });
 
 app.on("activate", () => {

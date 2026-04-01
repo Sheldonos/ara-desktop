@@ -1,0 +1,295 @@
+name: Build & Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"   # Triggers on version tags like v1.0.0, v1.2.3-beta.1
+  workflow_dispatch:
+    inputs:
+      draft:
+        description: "Create as draft release"
+        required: false
+        default: "true"
+        type: boolean
+
+permissions:
+  contents: write   # Required to create GitHub Releases and upload assets
+
+# ─── Concurrency: cancel any in-progress run for the same tag ─────────────────
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Job 1: Build macOS (.dmg + .zip) — runs on macOS runner for code signing
+  # ─────────────────────────────────────────────────────────────────────────────
+  build-mac:
+    name: Build macOS
+    runs-on: macos-14   # Apple Silicon runner (arm64 native)
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Bundle OpenClaw vendor
+        run: |
+          mkdir -p vendor/openclaw
+          # Copy the openclaw source into the vendor directory for bundling
+          if [ -d "vendor/openclaw-src" ]; then
+            cp -r vendor/openclaw-src/* vendor/openclaw/
+          else
+            echo "No openclaw source found — creating placeholder"
+            echo '{"name":"openclaw-placeholder","version":"0.0.1"}' > vendor/openclaw/package.json
+          fi
+
+      # ── macOS Code Signing ──────────────────────────────────────────────────
+      # Requires these secrets in the repo:
+      #   APPLE_CERTIFICATE_BASE64   — base64-encoded .p12 Developer ID certificate
+      #   APPLE_CERTIFICATE_PASSWORD — password for the .p12 file
+      #   APPLE_TEAM_ID              — Apple Developer Team ID (10-char string)
+      #   APPLE_ID                   — Apple ID email for notarization
+      #   APPLE_APP_SPECIFIC_PASSWORD — App-specific password for notarization
+      - name: Import Apple certificate
+        if: ${{ env.APPLE_CERTIFICATE_BASE64 != '' }}
+        env:
+          APPLE_CERTIFICATE_BASE64: ${{ secrets.APPLE_CERTIFICATE_BASE64 }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        run: |
+          KEYCHAIN_PATH="$RUNNER_TEMP/ara-signing.keychain-db"
+          KEYCHAIN_PASSWORD=$(openssl rand -base64 32)
+
+          # Create a temporary keychain
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
+          # Import the certificate
+          echo "$APPLE_CERTIFICATE_BASE64" | base64 --decode > "$RUNNER_TEMP/certificate.p12"
+          security import "$RUNNER_TEMP/certificate.p12" \
+            -k "$KEYCHAIN_PATH" \
+            -P "$APPLE_CERTIFICATE_PASSWORD" \
+            -T /usr/bin/codesign
+
+          # Set the keychain as default
+          security list-keychains -d user -s "$KEYCHAIN_PATH"
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
+      - name: Build renderer
+        run: npm run build:renderer
+
+      - name: Build main process
+        run: npm run build:main
+
+      - name: Package macOS (signed + notarized if certs present)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          # electron-builder reads these automatically for notarization
+          CSC_LINK: ${{ secrets.APPLE_CERTIFICATE_BASE64 }}
+          CSC_KEY_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        run: |
+          npx electron-builder --mac --publish always \
+            --config.publish.releaseType=${{ github.event.inputs.draft == 'true' && 'draft' || 'release' }}
+
+      - name: Upload macOS artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-builds
+          path: |
+            release/*.dmg
+            release/*.zip
+            release/latest-mac.yml
+          retention-days: 7
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Job 2: Build Windows (.exe NSIS installer + portable)
+  # ─────────────────────────────────────────────────────────────────────────────
+  build-windows:
+    name: Build Windows
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Bundle OpenClaw vendor
+        shell: bash
+        run: |
+          mkdir -p vendor/openclaw
+          if [ -d "vendor/openclaw-src" ]; then
+            cp -r vendor/openclaw-src/* vendor/openclaw/
+          else
+            echo '{"name":"openclaw-placeholder","version":"0.0.1"}' > vendor/openclaw/package.json
+          fi
+
+      - name: Build renderer
+        run: npm run build:renderer
+
+      - name: Build main process
+        run: npm run build:main
+
+      # ── Windows Code Signing ─────────────────────────────────────────────────
+      # Optional: requires WIN_CERTIFICATE_BASE64 and WIN_CERTIFICATE_PASSWORD secrets
+      - name: Package Windows
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          WIN_CSC_LINK: ${{ secrets.WIN_CERTIFICATE_BASE64 }}
+          WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CERTIFICATE_PASSWORD }}
+        run: |
+          npx electron-builder --win --publish always `
+            --config.publish.releaseType=${{ github.event.inputs.draft == 'true' && 'draft' || 'release' }}
+
+      - name: Upload Windows artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-builds
+          path: |
+            release/*.exe
+            release/latest.yml
+          retention-days: 7
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Job 3: Build Linux (.AppImage + .deb) — bonus platform
+  # ─────────────────────────────────────────────────────────────────────────────
+  build-linux:
+    name: Build Linux
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y rpm fakeroot dpkg
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Bundle OpenClaw vendor
+        run: |
+          mkdir -p vendor/openclaw
+          if [ -d "vendor/openclaw-src" ]; then
+            cp -r vendor/openclaw-src/* vendor/openclaw/
+          else
+            echo '{"name":"openclaw-placeholder","version":"0.0.1"}' > vendor/openclaw/package.json
+          fi
+
+      - name: Build renderer
+        run: npm run build:renderer
+
+      - name: Build main process
+        run: npm run build:main
+
+      - name: Package Linux
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          npx electron-builder --linux --publish always \
+            --config.publish.releaseType=${{ github.event.inputs.draft == 'true' && 'draft' || 'release' }}
+
+      - name: Upload Linux artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-builds
+          path: |
+            release/*.AppImage
+            release/*.deb
+            release/latest-linux.yml
+          retention-days: 7
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Job 4: Finalize release — runs after all platform builds succeed
+  # ─────────────────────────────────────────────────────────────────────────────
+  finalize-release:
+    name: Finalize Release
+    needs: [build-mac, build-windows, build-linux]
+    runs-on: ubuntu-22.04
+    if: always() && (needs.build-mac.result == 'success' || needs.build-windows.result == 'success')
+
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: all-artifacts
+
+      - name: List release assets
+        run: find all-artifacts -type f | sort
+
+      - name: Publish release summary
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const tag = context.ref.replace('refs/tags/', '');
+            const isDraft = '${{ github.event.inputs.draft }}' === 'true';
+
+            // Find the release created by electron-builder
+            const releases = await github.rest.repos.listReleases({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+            });
+
+            const release = releases.data.find(r => r.tag_name === tag);
+            if (!release) {
+              console.log('No release found for tag:', tag);
+              return;
+            }
+
+            // Publish the release if not a draft
+            if (!isDraft && release.draft) {
+              await github.rest.repos.updateRelease({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                release_id: release.id,
+                draft: false,
+              });
+              console.log('Release published:', release.html_url);
+            }
+
+            core.summary
+              .addHeading('ARA Desktop Release')
+              .addTable([
+                [{data: 'Platform', header: true}, {data: 'Status', header: true}, {data: 'Assets', header: true}],
+                ['macOS', '${{ needs.build-mac.result }}', '.dmg (x64 + arm64)'],
+                ['Windows', '${{ needs.build-windows.result }}', '.exe (NSIS installer)'],
+                ['Linux', '${{ needs.build-linux.result }}', '.AppImage + .deb'],
+              ])
+              .addLink('View Release', release.html_url)
+              .write();
