@@ -6,3 +6,4 @@ vendor/openclaw/node_modules/
 release/
 out/
 .DS_Store
+.github/workflows/
