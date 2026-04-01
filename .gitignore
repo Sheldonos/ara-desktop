@@ -1,0 +1,8 @@
+node_modules/
+dist/
+vendor/openclaw/node_modules/
+*.dmg
+*.zip
+release/
+out/
+.DS_Store

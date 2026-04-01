@@ -1,0 +1,49 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ─── ARA Design Tokens ──────────────────────────────────────────────────────── */
+:root {
+  --ara-50:  #eef2ff;
+  --ara-100: #e0e7ff;
+  --ara-200: #c7d2fe;
+  --ara-300: #a5b4fc;
+  --ara-400: #818cf8;
+  --ara-500: #6366f1;
+  --ara-600: #4f46e5;
+  --ara-700: #4338ca;
+  --ara-800: #3730a3;
+  --ara-900: #312e81;
+  --ara-950: #1e1b4b;
+  --surface: #0f0f14;
+  --surface-2: #16161f;
+  --surface-3: #1c1c28;
+}
+
+/* ─── Base reset ─────────────────────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; }
+
+html, body, #root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  background: var(--surface);
+  color: white;
+  font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Electron drag region */
+.drag-region { -webkit-app-region: drag; }
+.no-drag     { -webkit-app-region: no-drag; }
+
+/* ─── Scrollbar ──────────────────────────────────────────────────────────────── */
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.12); border-radius: 2px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.2); }
+
+/* ─── Selection ──────────────────────────────────────────────────────────────── */
+::selection { background: rgba(99,102,241,0.35); }
