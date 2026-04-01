@@ -4,10 +4,11 @@ import {
   Key, Cpu, Wifi, CreditCard, Shield, Bell, Palette,
   Eye, EyeOff, CheckCircle2, AlertCircle, Loader2,
   ExternalLink, RefreshCw, ChevronRight, Zap, Globe,
-  Server, Info
+  Server, Info, Cloud, LogIn, UserPlus, LogOut
 } from "lucide-react";
 import { useAppStore } from "../../store";
 import { useGateway } from "../../hooks/useGateway";
+import { createAraCloudSDK, DEFAULT_ARA_CLOUD_URL, type AraCloudClient, type UsageSummary } from "../../services/araCloud";
 
 // ─── Section wrapper ──────────────────────────────────────────────────────────
 
@@ -334,6 +335,192 @@ function GatewayStatusCard() {
   );
 }
 
+// ─── ARA Cloud Billing Panel ─────────────────────────────────────────────────
+
+function AraCloudBillingPanel() {
+  const { settings, updateSettings } = useAppStore();
+  const [mode, setMode] = useState<"login" | "register">("login");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [name, setName] = useState("");
+  const [cloudUrl, setCloudUrl] = useState(settings.araCloudUrl ?? DEFAULT_ARA_CLOUD_URL);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [client, setClient] = useState<AraCloudClient | null>(null);
+  const [usage, setUsage] = useState<UsageSummary | null>(null);
+
+  useEffect(() => {
+    if (settings.araCloudToken) loadCloudInfo();
+  }, []);
+
+  async function loadCloudInfo() {
+    try {
+      const sdk = createAraCloudSDK(settings.araCloudUrl ?? DEFAULT_ARA_CLOUD_URL, settings.araCloudToken);
+      const [c, u] = await Promise.all([sdk.getMe(), sdk.getUsageSummary()]);
+      setClient(c);
+      setUsage(u);
+    } catch {
+      updateSettings({ araCloudToken: undefined, araCloudApiKey: undefined });
+    }
+  }
+
+  async function handleAuth() {
+    setLoading(true);
+    setError("");
+    try {
+      const sdk = createAraCloudSDK(cloudUrl);
+      const result = mode === "login"
+        ? await sdk.login(email, password)
+        : await sdk.register(email, password, name);
+      const key = await sdk.provisionKey("ARA Desktop");
+      updateSettings({ araCloudUrl: cloudUrl, araCloudToken: result.token, araCloudApiKey: key.key, llmMode: "managed" });
+      setClient(result.client);
+      const u = await sdk.getUsageSummary();
+      setUsage(u);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Authentication failed");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function handleLogout() {
+    updateSettings({ araCloudToken: undefined, araCloudApiKey: undefined, llmMode: "openrouter" });
+    setClient(null);
+    setUsage(null);
+  }
+
+  const tierColors: Record<string, string> = {
+    FREE: "text-white/50 bg-white/10",
+    STARTER: "text-ara-300 bg-ara-900/50",
+    PROFESSIONAL: "text-purple-300 bg-purple-900/50",
+    ENTERPRISE: "text-amber-300 bg-amber-900/50",
+  };
+
+  if (client) {
+    return (
+      <Section title="ARA Cloud" description="Managed API keys, usage metering, and billing.">
+        <div className="p-4 rounded-2xl bg-emerald-900/20 border border-emerald-700/40 flex items-center gap-3 mb-4">
+          <CheckCircle2 className="w-4 h-4 text-emerald-400 flex-shrink-0" />
+          <div className="flex-1 min-w-0">
+            <p className="text-sm text-white font-medium">{client.email}</p>
+            <p className="text-xs text-white/40 mt-0.5">Connected to ARA Cloud</p>
+          </div>
+          <span className={`text-xs px-2 py-0.5 rounded-full font-semibold ${tierColors[client.tier] ?? tierColors.FREE}`}>
+            {client.tier}
+          </span>
+        </div>
+
+        {usage && (
+          <>
+            <div className="grid grid-cols-3 gap-2 mb-4">
+              {[
+                { label: "Today", value: usage.daily.tokens.toLocaleString(), sub: `$${usage.daily.costUsd.toFixed(4)}` },
+                { label: "This Month", value: usage.monthly.tokens.toLocaleString(), sub: `$${usage.monthly.costUsd.toFixed(2)}` },
+                { label: "Requests", value: usage.monthly.requests.toLocaleString(), sub: "this month" },
+              ].map((s) => (
+                <div key={s.label} className="p-3 rounded-xl bg-white/5 border border-white/8 text-center">
+                  <p className="text-xs text-white/40 mb-1">{s.label}</p>
+                  <p className="text-sm font-semibold text-white">{s.value}</p>
+                  <p className="text-xs text-white/30 mt-0.5">{s.sub}</p>
+                </div>
+              ))}
+            </div>
+
+            {usage.topModels.length > 0 && (
+              <div className="p-4 rounded-2xl bg-white/5 border border-white/8 mb-4">
+                <p className="text-xs text-white/40 uppercase tracking-wider mb-3">Top Models</p>
+                {usage.topModels.map((m) => (
+                  <div key={m.model} className="flex justify-between py-1.5 border-b border-white/5 last:border-0">
+                    <span className="text-xs text-white/60 truncate">{m.model.split("/").pop()}</span>
+                    <span className="text-xs text-white/40 font-mono">{m.tokens.toLocaleString()}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </>
+        )}
+
+        <div className="flex gap-2">
+          <button onClick={loadCloudInfo} className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white/8 hover:bg-white/12 text-white/60 text-xs transition-all">
+            <RefreshCw className="w-3.5 h-3.5" /> Refresh
+          </button>
+          <button onClick={handleLogout} className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-red-900/30 hover:bg-red-900/50 text-red-400 text-xs transition-all border border-red-800/40">
+            <LogOut className="w-3.5 h-3.5" /> Disconnect
+          </button>
+        </div>
+      </Section>
+    );
+  }
+
+  return (
+    <Section title="ARA Cloud" description="Managed API keys, usage metering, and billing. Free tier: 100k tokens/day.">
+      <div className="p-3 rounded-xl bg-ara-900/30 border border-ara-700/40 flex items-start gap-2 mb-4">
+        <Cloud className="w-4 h-4 text-ara-400 flex-shrink-0 mt-0.5" />
+        <p className="text-xs text-white/50">
+          Sign in to get a managed API key. We handle provider accounts, rate limits, and billing — you just use ARA.
+        </p>
+      </div>
+
+      <div className="mb-4">
+        <label className="text-xs text-white/40 block mb-1.5">ARA Cloud URL</label>
+        <input
+          value={cloudUrl}
+          onChange={(e) => setCloudUrl(e.target.value)}
+          placeholder="https://cloud.ara-platform.app"
+          className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-sm text-white font-mono placeholder-white/20 focus:outline-none focus:border-ara-500/50"
+        />
+      </div>
+
+      <div className="flex mb-4 border border-white/10 rounded-xl overflow-hidden">
+        {(["login", "register"] as const).map((m) => (
+          <button key={m} onClick={() => setMode(m)}
+            className={`flex-1 py-2 text-xs font-medium transition-all flex items-center justify-center gap-1.5 ${
+              mode === m ? "bg-ara-700/60 text-white" : "text-white/40 hover:text-white/60 hover:bg-white/5"
+            }`}>
+            {m === "login" ? <LogIn className="w-3.5 h-3.5" /> : <UserPlus className="w-3.5 h-3.5" />}
+            {m === "login" ? "Sign In" : "Create Account"}
+          </button>
+        ))}
+      </div>
+
+      {mode === "register" && (
+        <div className="mb-3">
+          <label className="text-xs text-white/40 block mb-1.5">Your Name</label>
+          <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Jane Smith"
+            className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-sm text-white placeholder-white/20 focus:outline-none focus:border-ara-500/50" />
+        </div>
+      )}
+
+      <div className="mb-3">
+        <label className="text-xs text-white/40 block mb-1.5">Email</label>
+        <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com"
+          className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-sm text-white placeholder-white/20 focus:outline-none focus:border-ara-500/50" />
+      </div>
+
+      <div className="mb-4">
+        <label className="text-xs text-white/40 block mb-1.5">Password</label>
+        <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••"
+          className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-sm text-white placeholder-white/20 focus:outline-none focus:border-ara-500/50" />
+      </div>
+
+      {error && (
+        <div className="flex items-center gap-2 p-3 rounded-xl bg-red-900/30 border border-red-800/40 text-red-400 text-xs mb-4">
+          <AlertCircle className="w-3.5 h-3.5 flex-shrink-0" /> {error}
+        </div>
+      )}
+
+      <button onClick={handleAuth} disabled={loading || !email || !password}
+        className="w-full py-2.5 rounded-xl bg-ara-600 hover:bg-ara-500 disabled:opacity-40 text-white text-sm font-medium transition-all flex items-center justify-center gap-2">
+        {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : mode === "login" ? <LogIn className="w-4 h-4" /> : <UserPlus className="w-4 h-4" />}
+        {loading ? "Connecting…" : mode === "login" ? "Sign In & Connect" : "Create Account & Connect"}
+      </button>
+
+      <p className="text-xs text-white/25 text-center mt-3">Free tier: 100k tokens/day · Llama 3.3 70B · No credit card required</p>
+    </Section>
+  );
+}
+
 // ─── Main SettingsPanel ───────────────────────────────────────────────────────
 
 type SettingsTab = "llm" | "keys" | "gateway" | "billing" | "notifications" | "about";
@@ -559,45 +746,7 @@ export function SettingsPanel() {
 
             {activeTab === "billing" && (
               <motion.div key="billing" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-                <Section title="Managed Billing" description="Let ARA manage your API usage and billing automatically.">
-                  <div className="p-4 rounded-2xl bg-gradient-to-br from-ara-900/60 to-ara-800/30 border border-ara-700/40 mb-4">
-                    <div className="flex items-center gap-3 mb-3">
-                      <div className="w-9 h-9 rounded-xl bg-ara-700/60 flex items-center justify-center">
-                        <CreditCard className="w-4 h-4 text-ara-300" />
-                      </div>
-                      <div>
-                        <p className="text-sm font-semibold text-white">ARA Managed Plan</p>
-                        <p className="text-xs text-white/50">Pay-as-you-go · No setup required</p>
-                      </div>
-                    </div>
-                    <p className="text-xs text-white/60 mb-3">
-                      We provision dedicated API keys for your account, handle rate limits, and charge only for what you use.
-                      No need to manage your own provider accounts.
-                    </p>
-                    <button className="w-full py-2.5 rounded-xl bg-ara-600 hover:bg-ara-500 text-white text-sm font-medium transition-all">
-                      Enable Managed Billing →
-                    </button>
-                  </div>
-
-                  <div className="p-4 rounded-2xl bg-white/5 border border-white/8">
-                    <p className="text-xs text-white/40 uppercase tracking-wider mb-3">Usage This Month</p>
-                    <div className="space-y-2">
-                      {[
-                        { label: "LLM tokens", value: "—", sub: "No managed plan active" },
-                        { label: "TTS characters", value: "—", sub: "No managed plan active" },
-                        { label: "STT minutes", value: "—", sub: "No managed plan active" },
-                      ].map((item) => (
-                        <div key={item.label} className="flex items-center justify-between py-2 border-b border-white/5 last:border-0">
-                          <div>
-                            <p className="text-sm text-white/70">{item.label}</p>
-                            <p className="text-xs text-white/30">{item.sub}</p>
-                          </div>
-                          <p className="text-sm text-white/50 font-mono">{item.value}</p>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                </Section>
+                <AraCloudBillingPanel />
               </motion.div>
             )}
 

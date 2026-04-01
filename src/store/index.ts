@@ -112,6 +112,11 @@ export interface AppSettings {
   notifyHoldEnd?: boolean;
   notifyApproval?: boolean;
   notifyBilling?: boolean;
+  // ARA Cloud
+  araCloudUrl?: string;
+  araCloudToken?: string;
+  araCloudApiKey?: string;
+  llmMode?: "openrouter" | "openai" | "anthropic" | "managed";
 }
 
 // ─── Store ────────────────────────────────────────────────────────────────────
